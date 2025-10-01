@@ -1,20 +1,7 @@
 ----------------------------------------------------------------
-Wed Oct 01 15:43:34 WAT 2025:
-Booting Derby version The Apache Software Foundation - Apache Derby - 10.15.2.0 - (1873585): instance a816c00e-0199-a03a-85d1-00000102d220 
+Wed Oct 01 23:53:00 WAT 2025:
+Booting Derby version The Apache Software Foundation - Apache Derby - 10.15.2.0 - (1873585): instance a816c00e-0199-a1fa-9ecd-000000f65d50 
 on database directory C:\Nomis3\dbs\nomis3db with class loader jdk.internal.loader.ClassLoaders$AppClassLoader@2a139a55 
-Loaded from file:/C:/Users/NwokomaAnthony/Desktop/PROJECTS/SOFTWARES/PYTHON/nomisMigration/src/db/DerbyJdbcDriver/derby.jar
-java.vendor=Oracle Corporation
-java.runtime.version=17.0.12+8-LTS-286
-user.dir=C:\Users\NwokomaAnthony\Desktop\PROJECTS\SOFTWARES\PYTHON\nomisMigration
-os.name=Windows 11
-os.arch=amd64
-os.version=10.0
-derby.system.home=null
-Database Class Loader started - derby.database.classpath=''
-----------------------------------------------------------------
-Wed Oct 01 15:45:34 WAT 2025:
-Booting Derby version The Apache Software Foundation - Apache Derby - 10.15.2.0 - (1873585): instance 020e0090-0199-a03a-85d1-00000102d220 
-on database directory C:\Nomis3TCCI\dbs\nomis3db with class loader jdk.internal.loader.ClassLoaders$AppClassLoader@2a139a55 
 Loaded from file:/C:/Users/NwokomaAnthony/Desktop/PROJECTS/SOFTWARES/PYTHON/nomisMigration/src/db/DerbyJdbcDriver/derby.jar
 java.vendor=Oracle Corporation
 java.runtime.version=17.0.12+8-LTS-286

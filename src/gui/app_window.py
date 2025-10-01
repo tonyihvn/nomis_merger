@@ -1,8 +1,18 @@
 import os
-from tkinter import Frame, Button, Label, Entry, messagebox, Text, Scrollbar, VERTICAL, HORIZONTAL, END, PanedWindow, BOTH, LEFT, RIGHT, X, Y, TOP, BOTTOM
+import pandas as pd
+import threading
+from tkinter import (
+    Frame, Button, Label, Entry, messagebox, Text, Scrollbar, VERTICAL, HORIZONTAL, END,
+    PanedWindow, BOTH, LEFT, RIGHT, X, Y, TOP, BOTTOM, Toplevel
+)
 from tkinter import ttk
+from tkinter import filedialog
+
 from db.derby_connector import DerbyConnector
 from db.merge_logic import MergeLogic
+
+def ensure_schema(table_name):
+    return table_name if '.' in table_name else f"APP.{table_name}"
 
 class AppWindow(Frame):
     def __init__(self, root, db1_connector, db2_connector, merge_logic):
@@ -11,132 +21,164 @@ class AppWindow(Frame):
         self.db2_connector = db2_connector
         self.merge_logic = merge_logic
 
+        self.last_selected_table = None
+        self.last_selected_db = None
+        self.pending_merge = False
+        self.pending_merge_table = None
         self.page_size = 100
-        self.current_page = 0
-        self.current_table = None
-        self.current_connector = None
 
-        # Main PanedWindow
+        # --- Main vertical PanedWindow ---
         self.main_pane = PanedWindow(self, orient="vertical")
         self.main_pane.pack(fill=BOTH, expand=True)
 
-        # Top PanedWindow (DB1 and DB2 tables)
-        self.top_pane = PanedWindow(self.main_pane, orient="horizontal")
-        self.main_pane.add(self.top_pane, stretch="always")
+        # --- Top: Connection settings and table lists ---
+        self.top_frame = Frame(self.main_pane)
+        self.main_pane.add(self.top_frame, minsize=120)
 
-        # --- DB1 Section ---
-        self.db1_frame = Frame(self.top_pane)
-        self.top_pane.add(self.db1_frame, minsize=200, stretch="always")
+        # Connection settings row
+        self.conn_frame = Frame(self.top_frame)
+        self.conn_frame.pack(fill=X, pady=5)
 
-        self.db1_label = Label(self.db1_frame, text="Database 1 Path:")
-        self.db1_label.pack(anchor="w")
-        self.db1_entry = Entry(self.db1_frame, width=35)
-        self.db1_entry.pack(fill=X)
+        # DB1
+        Label(self.conn_frame, text="DB1 Path:").pack(side=LEFT)
+        self.db1_entry = Entry(self.conn_frame, width=30)
+        self.db1_entry.pack(side=LEFT, padx=2)
         self.db1_entry.insert(0, r"C:\Nomis3\dbs\nomis3db")
-
-        # Username, password, connect in one row
-        self.db1_row = Frame(self.db1_frame)
-        self.db1_row.pack(fill=X, pady=2)
-        Label(self.db1_row, text="Username:").pack(side=LEFT)
-        self.db1_user_entry = Entry(self.db1_row, width=10)
+        Label(self.conn_frame, text="Facility Name:").pack(side=LEFT)
+        self.db1_facility_entry = Entry(self.conn_frame, width=15)
+        self.db1_facility_entry.pack(side=LEFT, padx=2)
+        self.db1_facility_entry.insert(0, "Facility1")
+        Label(self.conn_frame, text="Username:").pack(side=LEFT)
+        self.db1_user_entry = Entry(self.conn_frame, width=10)
         self.db1_user_entry.pack(side=LEFT, padx=2)
         self.db1_user_entry.insert(0, "nomis")
-        Label(self.db1_row, text="Password:").pack(side=LEFT)
-        self.db1_pass_entry = Entry(self.db1_row, width=10, show="*")
+        Label(self.conn_frame, text="Password:").pack(side=LEFT)
+        self.db1_pass_entry = Entry(self.conn_frame, width=10, show="*")
         self.db1_pass_entry.pack(side=LEFT, padx=2)
         self.db1_pass_entry.insert(0, "nomispw")
-        self.db1_connect_button = Button(self.db1_row, text="Connect", command=self.connect_db1)
+        self.db1_connect_button = Button(self.conn_frame, text="Connect DB1", command=self.connect_db1)
         self.db1_connect_button.pack(side=LEFT, padx=2)
 
-        self.db1_tables_label = Label(self.db1_frame, text="DB1 Tables")
-        self.db1_tables_label.pack(anchor="w")
-        self.db1_tables = ttk.Treeview(self.db1_frame, columns=("Table",), show="headings", height=15)
-        self.db1_tables.heading("Table", text="Table Name")
-        self.db1_tables.pack(fill=BOTH, expand=True)
-        self.db1_tables.bind("<<TreeviewSelect>>", self.display_db1_table_content)
-        self.db1_tables_scroll = Scrollbar(self.db1_frame, orient=VERTICAL, command=self.db1_tables.yview)
-        self.db1_tables.configure(yscrollcommand=self.db1_tables_scroll.set)
-        self.db1_tables_scroll.pack(side=RIGHT, fill=Y)
-
-        # --- DB2 Section ---
-        self.db2_frame = Frame(self.top_pane)
-        self.top_pane.add(self.db2_frame, minsize=200, stretch="always")
-
-        self.db2_label = Label(self.db2_frame, text="Database 2 Path:")
-        self.db2_label.pack(anchor="w")
-        self.db2_entry = Entry(self.db2_frame, width=35)
-        self.db2_entry.pack(fill=X)
+        # DB2
+        Label(self.conn_frame, text="   DB2 Path:").pack(side=LEFT)
+        self.db2_entry = Entry(self.conn_frame, width=30)
+        self.db2_entry.pack(side=LEFT, padx=2)
         self.db2_entry.insert(0, r"C:\Nomis3\dbs\nomis3db")
-
-        # Username, password, connect in one row
-        self.db2_row = Frame(self.db2_frame)
-        self.db2_row.pack(fill=X, pady=2)
-        Label(self.db2_row, text="Username:").pack(side=LEFT)
-        self.db2_user_entry = Entry(self.db2_row, width=10)
+        Label(self.conn_frame, text="Facility Name:").pack(side=LEFT)
+        self.db2_facility_entry = Entry(self.conn_frame, width=15)
+        self.db2_facility_entry.pack(side=LEFT, padx=2)
+        self.db2_facility_entry.insert(0, "Facility2")
+        Label(self.conn_frame, text="Username:").pack(side=LEFT)
+        self.db2_user_entry = Entry(self.conn_frame, width=10)
         self.db2_user_entry.pack(side=LEFT, padx=2)
         self.db2_user_entry.insert(0, "nomis")
-        Label(self.db2_row, text="Password:").pack(side=LEFT)
-        self.db2_pass_entry = Entry(self.db2_row, width=10, show="*")
+        Label(self.conn_frame, text="Password:").pack(side=LEFT)
+        self.db2_pass_entry = Entry(self.conn_frame, width=10, show="*")
         self.db2_pass_entry.pack(side=LEFT, padx=2)
         self.db2_pass_entry.insert(0, "nomispw")
-        self.db2_connect_button = Button(self.db2_row, text="Connect", command=self.connect_db2)
+        self.db2_connect_button = Button(self.conn_frame, text="Connect DB2", command=self.connect_db2)
         self.db2_connect_button.pack(side=LEFT, padx=2)
 
-        self.db2_tables_label = Label(self.db2_frame, text="DB2 Tables")
-        self.db2_tables_label.pack(anchor="w")
-        self.db2_tables = ttk.Treeview(self.db2_frame, columns=("Table",), show="headings", height=15)
+        # Table lists row (short height)
+        self.tables_frame = Frame(self.top_frame)
+        self.tables_frame.pack(fill=X, pady=5)
+
+        # DB1 Table List
+        self.db1_tables_label = Label(self.tables_frame, text="DB1 Tables")
+        self.db1_tables_label.pack(side=LEFT, anchor="n")
+        self.db1_tables = ttk.Treeview(self.tables_frame, columns=("Table",), show="headings", height=6)
+        self.db1_tables.heading("Table", text="Table Name")
+        self.db1_tables.pack(side=LEFT, fill=Y, padx=5)
+        self.db1_tables.bind("<<TreeviewSelect>>", self.display_db1_table_content)
+
+        # DB2 Table List
+        self.db2_tables_label = Label(self.tables_frame, text="DB2 Tables")
+        self.db2_tables_label.pack(side=LEFT, anchor="n")
+        self.db2_tables = ttk.Treeview(self.tables_frame, columns=("Table",), show="headings", height=6)
         self.db2_tables.heading("Table", text="Table Name")
-        self.db2_tables.pack(fill=BOTH, expand=True)
+        self.db2_tables.pack(side=LEFT, fill=Y, padx=5)
         self.db2_tables.bind("<<TreeviewSelect>>", self.display_db2_table_content)
-        self.db2_tables_scroll = Scrollbar(self.db2_frame, orient=VERTICAL, command=self.db2_tables.yview)
-        self.db2_tables.configure(yscrollcommand=self.db2_tables_scroll.set)
-        self.db2_tables_scroll.pack(side=RIGHT, fill=Y)
 
-        # --- Bottom PanedWindow (table content and controls) ---
-        self.bottom_pane = PanedWindow(self.main_pane, orient="vertical")
-        self.main_pane.add(self.bottom_pane, stretch="always")
+        # --- Middle: Query box (expandable) and buttons ---
+        self.query_pane = PanedWindow(self.main_pane, orient="vertical")
+        self.main_pane.add(self.query_pane, minsize=80)
 
-        # --- Controls row above table content ---
-        self.controls_frame = Frame(self.bottom_pane)
-        self.bottom_pane.add(self.controls_frame, minsize=50, stretch="never")
+        # Query section
+        self.query_frame = Frame(self.query_pane)
+        self.query_label = Label(self.query_frame, text="SQL Query", font=("Segoe UI", 10, "bold"))
+        self.query_label.pack(anchor="w", padx=5, pady=(10, 0))
 
-        self.sql_text = Text(self.controls_frame, height=2, width=40)
-        self.sql_text.pack(side=LEFT, padx=5, pady=2)
-        self.sql_execute_button = Button(self.controls_frame, text="Execute SQL", command=self.execute_sql)
+        self.sql_text = Text(self.query_frame, height=4, wrap="word")
+        self.sql_text.pack(side=LEFT, fill=BOTH, expand=True)
+        self.sql_scroll = Scrollbar(self.query_frame, orient=VERTICAL, command=self.sql_text.yview)
+        self.sql_scroll.pack(side=RIGHT, fill=Y)
+        self.sql_text.config(yscrollcommand=self.sql_scroll.set)
+        self.query_pane.add(self.query_frame, minsize=60)
+
+        # Buttons row (always visible)
+        self.buttons_frame = Frame(self.query_pane)
+        self.buttons_frame.pack(fill=X, pady=(0, 5))
+        self.sql_execute_button = Button(self.buttons_frame, text="Execute SQL", command=self.execute_sql)
         self.sql_execute_button.pack(side=LEFT, padx=2)
-        self.merge_button = Button(self.controls_frame, text="Merge Selected Table", command=self.merge_selected_table)
+        self.merge_button = Button(self.buttons_frame, text="Merge Selected Table", command=self.merge_selected_table)
         self.merge_button.pack(side=LEFT, padx=2)
-        self.prev_button = Button(self.controls_frame, text="Previous", command=self.prev_page)
+        self.download_button = Button(self.buttons_frame, text="Download Excel", command=self.download_excel)
+        self.download_button.pack(side=LEFT, padx=2)
+        self.prev_button = Button(self.buttons_frame, text="Previous", command=self.prev_page)
         self.prev_button.pack(side=LEFT, padx=2)
-        self.next_button = Button(self.controls_frame, text="Next", command=self.next_page)
+        self.next_button = Button(self.buttons_frame, text="Next", command=self.next_page)
         self.next_button.pack(side=LEFT, padx=2)
-        self.page_label = Label(self.controls_frame, text="Page 1")
+        self.page_label = Label(self.buttons_frame, text="Page 1")
         self.page_label.pack(side=LEFT, padx=2)
-        self.limit_label = Label(self.controls_frame, text="Limit:")
+        self.limit_label = Label(self.buttons_frame, text="Limit:")
         self.limit_label.pack(side=LEFT)
-        self.limit_entry = Entry(self.controls_frame, width=5)
+        self.limit_entry = Entry(self.buttons_frame, width=5)
         self.limit_entry.insert(0, "100")
         self.limit_entry.pack(side=LEFT, padx=2)
+        self.query_pane.add(self.buttons_frame, minsize=40)
 
-        # --- Table Content Section ---
-        self.content_frame = Frame(self.bottom_pane)
-        self.bottom_pane.add(self.content_frame, minsize=200, stretch="always")
-
+        # --- Table content (full width) ---
+        self.content_frame = Frame(self.main_pane, height=250)
+        self.main_pane.add(self.content_frame, minsize=200)
+        self.content_frame.pack_propagate(False)
+        self.content_source_label = Label(self.content_frame, text="No table selected", font=("Segoe UI", 10, "bold"))
+        self.content_source_label.pack(anchor="w", pady=(10, 2))
         self.content_tree = ttk.Treeview(self.content_frame, show="headings")
         self.content_tree.pack(fill=BOTH, expand=True, side=LEFT)
         self.content_scroll_y = Scrollbar(self.content_frame, orient=VERTICAL, command=self.content_tree.yview)
-        self.content_tree.config(yscrollcommand=self.content_scroll_y.set)
         self.content_scroll_y.pack(side=RIGHT, fill=Y)
+        self.content_tree.config(yscrollcommand=self.content_scroll_y.set)
         self.content_scroll_x = Scrollbar(self.content_frame, orient=HORIZONTAL, command=self.content_tree.xview)
-        self.content_tree.config(xscrollcommand=self.content_scroll_x.set)
         self.content_scroll_x.pack(side=BOTTOM, fill=X)
+        self.content_tree.config(xscrollcommand=self.content_scroll_x.set)
 
-        # Internal state
-        self.db1_table_list = []
-        self.db2_table_list = []
-        self.selected_db1_table = None
-        self.selected_db2_table = None
+        # --- Logs and Indexes (share one row) ---
+        self.bottom_frame = Frame(self.main_pane)
+        self.main_pane.add(self.bottom_frame, minsize=80)
+        # Log section (left)
+        self.log_frame = Frame(self.bottom_frame)
+        self.log_frame.pack(side=LEFT, fill=BOTH, expand=True)
+        self.log_label = Label(self.log_frame, text="Log", font=("Segoe UI", 10, "bold"))
+        self.log_label.pack(anchor="w", pady=(10, 0))
+        self.log_text = Text(self.log_frame, height=6, width=60, state="disabled", bg="#f4f4f4")
+        self.log_text.pack(fill=BOTH, padx=5, pady=(0, 5), expand=True)
+        # Table Index section (right)
+        self.index_frame = Frame(self.bottom_frame)
+        self.index_frame.pack(side=LEFT, fill=BOTH, expand=True)
+        self.index_label = Label(self.index_frame, text="Table Indexes", font=("Segoe UI", 10, "bold"))
+        self.index_label.pack(anchor="w", pady=(10, 0))
+        self.index_text = Text(self.index_frame, height=6, width=60, state="disabled", bg="#f4f4f4")
+        self.index_text.pack(fill=BOTH, padx=5, pady=(0, 5), expand=True)
 
+    # --- Utility methods ---
+
+    def log(self, message):
+        self.log_text.config(state="normal")
+        self.log_text.insert(END, message + "\n")
+        self.log_text.see(END)
+        self.log_text.config(state="disabled")
+
+    # --- Connection methods (implement as needed) ---
     def connect_db1(self):
         from main import DEFAULT_DRIVER_FOLDER, DEFAULT_DRIVER_CLASS
         path = self.db1_entry.get()
@@ -147,6 +189,9 @@ class AppWindow(Frame):
             self.db1_connector.connect()
             messagebox.showinfo("Success", "Connected to Database 1 successfully!")
             self.load_db1_tables()
+            # After successful connection:
+            if self.db2_connector.connection:
+                self.merge_logic = MergeLogic(self.db1_connector.connection, self.db2_connector.connection)
         except Exception as e:
             messagebox.showerror("Connection Error", f"Failed to connect to DB1:\n{e}")
 
@@ -160,6 +205,9 @@ class AppWindow(Frame):
             self.db2_connector.connect()
             messagebox.showinfo("Success", "Connected to Database 2 successfully!")
             self.load_db2_tables()
+            # After successful connection:
+            if self.db1_connector.connection:
+                self.merge_logic = MergeLogic(self.db1_connector.connection, self.db2_connector.connection)
         except Exception as e:
             messagebox.showerror("Connection Error", f"Failed to connect to DB2:\n{e}")
 
@@ -198,16 +246,25 @@ class AppWindow(Frame):
         selected = self.db1_tables.selection()
         if selected:
             table_name = self.db1_tables.item(selected[0])['values'][0]
-            self.selected_db1_table = table_name
+            self.last_selected_table = table_name
+            self.last_selected_db = "Database 1"  # Track selected DB
+            facility = self.db1_facility_entry.get()
+            self.content_source_label.config(text=f"Showing: {facility} - {table_name}")
+            # self.query_target_label.config(...)  # If you have this label
             self.display_table_content(self.db1_connector, table_name)
 
     def display_db2_table_content(self, event):
         selected = self.db2_tables.selection()
         if selected:
             table_name = self.db2_tables.item(selected[0])['values'][0]
-            self.selected_db2_table = table_name
+            self.last_selected_table = table_name
+            self.last_selected_db = "Database 2"  # Track selected DB
+            facility = self.db2_facility_entry.get()
+            self.content_source_label.config(text=f"Showing: {facility} - {table_name}")
+            # self.query_target_label.config(...)  # If you have this label
             self.display_table_content(self.db2_connector, table_name)
 
+    # --- Table content display (implement as needed) ---
     def display_table_content(self, connector, table_full_name, page=0):
         self.content_tree.delete(*self.content_tree.get_children())
         if not connector or not connector.connection:
@@ -254,27 +311,84 @@ class AppWindow(Frame):
         except Exception as e:
             messagebox.showerror("Error", f"Error loading table: {e}")
 
+    # --- Merge logic with SQL preview ---
     def merge_selected_table(self):
-        if not self.selected_db1_table or not self.selected_db2_table:
-            messagebox.showerror("Error", "Please select a table from both DB1 and DB2 to merge.")
+        if not self.last_selected_table:
+            self.log("Error: Please select a table to merge.")
+            messagebox.showerror("Error", "Please select a table to merge.")
             return
-        try:
-            merge_logic = MergeLogic(self.db1_connector.connection, self.db2_connector.connection)
-            merge_logic.merge_table(self.selected_db1_table, self.selected_db2_table)
-            messagebox.showinfo("Success", f"Table '{self.selected_db1_table}' merged with '{self.selected_db2_table}' successfully!")
-        except Exception as e:
-            messagebox.showerror("Merge Error", str(e))
 
+        table_name = ensure_schema(self.last_selected_table)
+        sql_statements = []
+
+        # 1. If OVCID or BENEFICIARYID, show the SELECT and DELETE SQL for non-positives
+        if "OVCID" in table_name.upper():
+            sql_statements.append("-- Get list of non-positives (OVCID):")
+            sql_statements.append("SELECT OVCID FROM APP.CHILDRENENROLLMENT WHERE CURRENTHIVSTATUS !=1;")
+            sql_statements.append(f"-- Delete these from {table_name} in DB2 before merging:")
+            sql_statements.append(f"DELETE FROM {table_name} WHERE OVCID IN (SELECT OVCID FROM APP.CHILDRENENROLLMENT WHERE CURRENTHIVSTATUS !=1);")
+        if "BENEFICIARYID" in table_name.upper():
+            sql_statements.append("-- Get list of non-positives (BENEFICIARYID):")
+            sql_statements.append("SELECT BENEFICIARYID FROM APP.ADULTHOUSEHOLDMEMBER WHERE CURRENTHIVSTATUS !=1;")
+            sql_statements.append(f"-- Delete these from {table_name} in DB2 before merging:")
+            sql_statements.append(f"DELETE FROM {table_name} WHERE BENEFICIARYID IN (SELECT BENEFICIARYID FROM APP.ADULTHOUSEHOLDMEMBER WHERE CURRENTHIVSTATUS !=1);")
+
+        # 2. Generate the INSERT SQL for the merge
+        try:
+            db2_cur = self.db2_connector.connection.cursor()
+            db2_cur.execute(f"SELECT * FROM {table_name} FETCH FIRST ROW ONLY")
+            columns = [desc[0] for desc in db2_cur.description]
+            col_list = ', '.join([f'"{col}"' for col in columns])
+            sql_statements.append("-- Merge data from DB2 to DB1:")
+            sql_statements.append(f"INSERT INTO {table_name} ({col_list}) SELECT {col_list} FROM {table_name} IN DATABASE2;")
+        except Exception as e:
+            sql_statements.append("-- Could not preview INSERT SQL due to error: " + str(e))
+
+        # Show the SQL in the Query Box
+        self.sql_text.delete("1.0", END)
+        self.sql_text.insert("1.0", "\n".join(sql_statements))
+        self.pending_merge = True
+        self.pending_merge_table = table_name
+        self.log("Review the actual SQL above and click 'Execute SQL' to proceed.")
+
+    # --- Execute SQL logic ---
     def execute_sql(self):
         sql = self.sql_text.get("1.0", END).strip()
-        if not sql:
-            messagebox.showerror("Error", "Please enter an SQL query.")
+        if self.pending_merge:
+            table_name = self.pending_merge_table
+            db2_cur = self.db2_connector.connection.cursor()
+            # 1. If OVCID or BENEFICIARYID, filter out non-positives from DB2 before merging
+            if "OVCID" in table_name.upper():
+                db2_cur.execute("SELECT OVCID FROM APP.CHILDRENENROLLMENT WHERE CURRENTHIVSTATUS !=1")
+                non_positives = [row[0] for row in db2_cur.fetchall()]
+                if non_positives:
+                    placeholders = ','.join(['?'] * len(non_positives))
+                    del_sql = f'DELETE FROM {table_name} WHERE OVCID IN ({placeholders})'
+                    db2_cur.execute(del_sql, non_positives)
+                    self.db2_connector.connection.commit()
+                    self.log(f"Deleted non-positive OVCIDs from {table_name} in DB2.")
+            if "BENEFICIARYID" in table_name.upper():
+                db2_cur.execute("SELECT BENEFICIARYID FROM APP.ADULTHOUSEHOLDMEMBER WHERE CURRENTHIVSTATUS !=1")
+                non_positives = [row[0] for row in db2_cur.fetchall()]
+                if non_positives:
+                    placeholders = ','.join(['?'] * len(non_positives))
+                    del_sql = f'DELETE FROM {table_name} WHERE BENEFICIARYID IN ({placeholders})'
+                    db2_cur.execute(del_sql, non_positives)
+                    self.db2_connector.connection.commit()
+                    self.log(f"Deleted non-positive BENEFICIARYIDs from {table_name} in DB2.")
+            # 2. Now perform the merge
+            inserted = self.merge_logic.merge_table(table_name, table_name, log_callback=self.log)
+            self.log(f"Success: Merged {inserted} records from '{table_name}' in Database 2 into '{table_name}' in Database 1.")
+            messagebox.showinfo("Success", f"Merged {inserted} records from '{table_name}' in Database 2 into '{table_name}' in Database 1.")
+            self.pending_merge = False
+            self.pending_merge_table = None
             return
-        # Decide which DB to run on based on last selected table
+
+        # Normal SQL execution
         connector = None
-        if self.selected_db1_table:
+        if self.last_selected_db == "Database 1":
             connector = self.db1_connector
-        elif self.selected_db2_table:
+        elif self.last_selected_db == "Database 2":
             connector = self.db2_connector
         else:
             messagebox.showerror("Error", "Please select a table first.")
@@ -284,18 +398,86 @@ class AppWindow(Frame):
             cursor.execute(sql)
             if cursor.description:
                 columns = [desc[0] for desc in cursor.description]
+                self.content_tree["columns"] = columns
+                for col in columns:
+                    self.content_tree.heading(col, text=col)
+                    self.content_tree.column(col, width=120, minwidth=120, stretch=False, anchor="center")
+                self.content_tree.delete(*self.content_tree.get_children())
                 rows = cursor.fetchall()
-                self.content_text.delete(1.0, END)
-                self.content_text.insert(END, "\t".join(columns) + "\n")
                 for row in rows:
-                    self.content_text.insert(END, "\t".join(str(x) for x in row) + "\n")
+                    self.content_tree.insert("", "end", values=row)
+                self.log(f"SQL executed successfully: {sql}")
             else:
                 connector.connection.commit()
-                self.content_text.delete(1.0, END)
-                self.content_text.insert(END, "Query executed successfully.")
+                self.content_tree.delete(*self.content_tree.get_children())
+                self.log(f"SQL executed successfully (no result set): {sql}")
         except Exception as e:
-            self.content_text.delete(1.0, END)
-            self.content_text.insert(END, f"SQL Error: {e}")
+            self.log(f"SQL execution error: {e} | SQL: {sql}")
+            messagebox.showerror("SQL Error", f"ERROR EXECUTING SQL: {e}")
+
+    # --- Download Excel, Pagination, and other methods ---
+    def download_excel(self):
+        if not self.last_selected_table:
+            self.log("Error: Please select a table to download.")
+            messagebox.showerror("Error", "Please select a table to download.")
+            return
+        table_name = ensure_schema(self.last_selected_table)
+        connector = None
+        db_label = None
+        if self.last_selected_db == "Database 1":
+            connector = self.db1_connector
+            db_label = "database1"
+        elif self.last_selected_db == "Database 2":
+            connector = self.db2_connector
+            db_label = "database2"
+        else:
+            messagebox.showerror("Error", "Please select a table first.")
+            return
+        if not connector or not table_name:
+            messagebox.showerror("Error", "No table selected.")
+            return
+
+        # Prepare downloads folder at project root
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        downloads_folder = os.path.join(project_root, 'downloads')
+        os.makedirs(downloads_folder, exist_ok=True)
+
+        # Suggest filename automatically
+        if '.' in table_name:
+            _, table = table_name.split('.', 1)
+        else:
+            table = table_name
+        facility = self.db1_facility_entry.get() if self.last_selected_db == "Database 1" else self.db2_facility_entry.get()
+        default_filename = f"{table}-{facility}.xlsx"
+        file_path = os.path.join(downloads_folder, default_filename)
+
+        # Show progress window
+        progress_win = Toplevel(self)
+        progress_win.title("Exporting...")
+        progress_label = Label(progress_win, text="Exporting table to Excel, please wait...")
+        progress_label.pack(padx=20, pady=20)
+        progress_win.grab_set()
+        progress_win.update()
+
+        def export_job():
+            try:
+                if '.' in table_name:
+                    schema, table = table_name.split('.', 1)
+                else:
+                    schema, table = 'APP', table_name
+                cursor = connector.connection.cursor()
+                cursor.execute(f'SELECT * FROM "{schema}"."{table}"')
+                columns = [desc[0] for desc in cursor.description]
+                rows = cursor.fetchall()
+                df = pd.DataFrame(rows, columns=columns)
+                df.to_excel(file_path, index=False)
+                self.after(0, lambda: messagebox.showinfo("Success", f"Table exported to {file_path}"))
+            except Exception as e:
+                self.after(0, lambda: messagebox.showerror("Export Error", f"Failed to export table: {e}"))
+            finally:
+                self.after(0, progress_win.destroy)
+
+        threading.Thread(target=export_job, daemon=True).start()
 
     def next_page(self):
         if self.current_table and self.current_connector:
