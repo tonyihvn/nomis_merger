@@ -1,0 +1,4 @@
+jaydebeapi
+JPype1
+pandas
+sqlalchemy
