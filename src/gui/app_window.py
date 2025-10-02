@@ -590,25 +590,46 @@ class AppWindow(Frame):
         self.log("Starting full data migration from DB2 to DB1...")
         self.log("="*50)
 
+        # --- Progress Bar Window ---
+        progress_win = Toplevel(self)
+        progress_win.title("Merging Progress")
+        progress_win.geometry("400x120")
+        progress_win.grab_set()
+
+        progress_label = Label(progress_win, text="Initializing...")
+        progress_label.pack(pady=10, padx=10)
+
+        progress_bar = ttk.Progressbar(progress_win, orient=HORIZONTAL, length=350, mode='determinate')
+        progress_bar.pack(pady=10, padx=10)
+
         total_tables = len(self.MERGE_ALL_TABLES_LIST)
+        progress_bar["maximum"] = total_tables
+
         for i, table_name_no_schema in enumerate(self.MERGE_ALL_TABLES_LIST):
             table_name = ensure_schema(table_name_no_schema)
-            self.log("\n" + "-"*50)
-            self.log(f"Processing table {i+1}/{total_tables}: {table_name}")
-            self.log("-" * 50)
+            
+            # Update progress bar and label
+            self.after(0, lambda: progress_label.config(text=f"Processing table {i+1}/{total_tables}: {table_name}"))
+            self.after(0, lambda: progress_bar.config(value=i))
+            self.after(0, progress_win.update_idletasks)
             
             try:
                 # 1. Perform pre-merge cleanup
                 self._pre_merge_cleanup(table_name)
 
                 # 2. Perform the merge
-                self.log(f"Starting merge for {table_name}...")
                 inserted_count = self.merge_logic.merge_table(table_name, table_name, log_callback=self.log)
-                self.log(f"SUCCESS: Merged {inserted_count} records for table {table_name}.")
+                if inserted_count > 0:
+                    self.log(f"Merged {inserted_count} records for table {table_name}.")
 
             except Exception as e:
                 self.log(f"FATAL ERROR for table {table_name}: {e}")
                 self.log(f"Skipping to next table.")
+
+        # Finalize progress bar
+        self.after(0, lambda: progress_label.config(text="Merge process finished!"))
+        self.after(0, lambda: progress_bar.config(value=total_tables))
+        self.after(1500, progress_win.destroy) # Close progress window after 1.5 seconds
 
         self.log("\n" + "="*50)
         self.log("Full data migration process finished.")

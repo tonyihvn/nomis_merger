@@ -48,41 +48,32 @@ class MergeLogic:
         """)
         auto_inc_cols = [row[0] for row in db1_cur.fetchall()]
 
-        # Prepare insert statement for all columns
-        col_list = ', '.join([f'"{col}"' for col in db1_columns])
-        placeholders = ', '.join(['?'] * len(db1_columns))
+        # Prepare insert statement for non-auto-increment columns
+        insert_columns = [col for col in db1_columns if col not in auto_inc_cols]
+        col_list = ', '.join([f'"{col}"' for col in insert_columns])
+        placeholders = ', '.join(['?'] * len(insert_columns))
 
         # Fetch all data from db2
         db2_cur.execute(f'SELECT * FROM {db2_table}')
         db2_columns = [desc[0] for desc in db2_cur.description]
         db2_rows = db2_cur.fetchall()
 
-        # Map db2 columns to db1 columns (by name)
+        # Map db2 columns to the columns we will be inserting into db1
         try:
-            col_indexes = [db2_columns.index(col) for col in db1_columns]
+            col_indexes = [db2_columns.index(col) for col in insert_columns]
         except ValueError as e:
             raise Exception(f"Column mismatch between source and target tables: {e}")
 
-        # Pre-calculate the next available ID for auto-increment columns to avoid querying in a loop
-        next_auto_inc_values = {}
-        for col in auto_inc_cols:
-            db1_cur.execute(f'SELECT MAX("{col}") FROM {db1_table}')
-            max_val = db1_cur.fetchone()[0]
-            next_auto_inc_values[col] = (max_val or 0) + 1
-
         inserted = 0
         for row in db2_rows:
-            values = list(row[i] for i in col_indexes) # Map source row to target column order
-            # For each auto-increment column, assign the next pre-calculated value
-            for idx, col in enumerate(db1_columns):
-                if col in auto_inc_cols:
-                    values[idx] = next_auto_inc_values[col]
-                    next_auto_inc_values[col] += 1 # Increment for the next row
+            # Map source row to target column order, excluding auto-increment columns
+            values = list(row[i] for i in col_indexes)
             try:
                 db1_cur.execute(f'INSERT INTO {db1_table} ({col_list}) VALUES ({placeholders})', values)
                 inserted += 1
-                if log_callback and inserted % 100 == 0:
-                    log_callback(f"{inserted} rows merged so far...")
+                # Reduce logging verbosity
+                # if log_callback and inserted % 100 == 0:
+                #     log_callback(f"{inserted} rows merged so far...")
             except Exception as e:
                 if log_callback:
                     log_callback(f"Insert error: {e} | Values: {values}")
