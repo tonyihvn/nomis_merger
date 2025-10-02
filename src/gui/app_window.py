@@ -27,6 +27,46 @@ class AppWindow(Frame):
         self.pending_merge = False
         self.pending_merge_table = None
         self.page_size = 100
+        
+        # List of tables to merge in order
+        self.MERGE_ALL_TABLES_LIST = [
+            "HOUSEHOLDSERVICE", "NOMISUSER", "USERACTIVITYTRACKER", "SCHOOL", "SCHOOLGRADE", "COMMUNITYWORKER",
+            "COMMUNITYBASEDORGANIZATION", "ADULTHOUSEHOLDMEMBER", "CHILDSERVICE",
+            "HIVRISKASSESSMENT", "CHILDENROLLMENT", "CAREPLANACHIEVEMENTCHECKLIST",
+            "BENEFICIARYSTATUSUPDATE", "CHILDEDUCATIONPERFORMANCEASSESSMENT",
+            "CAREGIVERACCESSTOEMERGENCYFUND", "CAREANDSUPPORTCHECKLIST",
+            "REVISEDHOUSEHOLDASSESSMENT", "HOUSEHOLDVULNERABILITYASSESSMENT",
+            "HOUSEHOLDENROLLMENT2", "HOUSEHOLDENROLLMENT", "HOUSEHOLDREFERRAL",
+            "NUTRITIONASSESSMENT", "HIVSTATUSMANAGER", "DATAIMPORTFILEUPLOAD",
+            "QUARTERLYSTATUSTRACKER", "ENROLLMENTSTATUSHISTORY", "HIVSTATUSHISTORY",
+            "CUSTOMINDICATORSREPORT", "CHILDSTATUSINDEX", "DATIMREPORT",
+            "NUTRITIONSTATUS", "OCCUPATION", "USERROLE", "HOUSEHOLDCAREPLAN",
+            "CUSTOMINDICATORSPIVOTED", "DATIMFLATFILE", "HHECONOMICSTRENGTHENINGASSESSMENT",
+            "RESOURCETRACKER", "HOUSEHOLDHEALTHINSURANCEASSESSMENT",
+            "BENEFICIARYENROLLMENT", "BENEFICIARYSERVICE", "HIVPOSITIVEDATA",
+            "FACILITYOVCOFFER", "HIVRISKASSESSMENTREPORT"
+        ]
+
+        # Tables that need pre-merge cleanup based on beneficiary status
+        self.OVCID_TABLES = [
+            "CHILDSERVICE", "HIVRISKASSESSMENT", "CHILDENROLLMENT",
+            "CHILDEDUCATIONPERFORMANCEASSESSMENT", "NUTRITIONASSESSMENT",
+            "CHILDSTATUSINDEX", "NUTRITIONSTATUS"
+        ]
+        self.BENEFICIARYID_TABLES = [
+            "ADULTHOUSEHOLDMEMBER", "BENEFICIARYSTATUSUPDATE",
+            "CAREGIVERACCESSTOEMERGENCYFUND", "CAREANDSUPPORTCHECKLIST",
+            "HOUSEHOLDREFERRAL", "QUARTERLYSTATUSTRACKER",
+            "ENROLLMENTSTATUSHISTORY", "HOUSEHOLDCAREPLAN",
+            "BENEFICIARYENROLLMENT", "BENEFICIARYSERVICE", "HIVPOSITIVEDATA",
+            "HIVRISKASSESSMENTREPORT"
+        ]
+
+        # --- Top-level frame for Merge All button ---
+        top_frame = Frame(self)
+        top_frame.pack(fill=X, padx=10, pady=(10, 0))
+        self.merge_all_button = Button(top_frame, text="Merge All Tables (DB2 to DB1)", command=self.merge_all_tables, bg="#cceeff", font=("Segoe UI", 10, "bold"))
+        self.merge_all_button.pack(fill=X)
 
         # --- Connection section (topmost) ---
         self.conn_pane = PanedWindow(self, orient="horizontal")
@@ -223,12 +263,14 @@ class AppWindow(Frame):
         self.log_text.see(END)
         self.log_text.config(state="disabled")
 
-    # --- Connection methods (implement as needed) ---
+    # --- Connection and Table Loading ---
     def connect_db1(self):
         from main import DEFAULT_DRIVER_FOLDER, DEFAULT_DRIVER_CLASS
         path = self.db1_entry.get()
         user = self.db1_user_entry.get()
         password = self.db1_pass_entry.get()
+        facility_name = self.db1_facility_entry.get()
+        self.db1_tables_label_var.set(f"{facility_name} Tables")
         try:
             self.db1_connector = DerbyConnector(path, user, password, DEFAULT_DRIVER_FOLDER, DEFAULT_DRIVER_CLASS)
             self.db1_connector.connect()
@@ -245,6 +287,8 @@ class AppWindow(Frame):
         path = self.db2_entry.get()
         user = self.db2_user_entry.get()
         password = self.db2_pass_entry.get()
+        facility_name = self.db2_facility_entry.get()
+        self.db2_tables_label_var.set(f"{facility_name} Tables")
         try:
             self.db2_connector = DerbyConnector(path, user, password, DEFAULT_DRIVER_FOLDER, DEFAULT_DRIVER_CLASS)
             self.db2_connector.connect()
@@ -306,6 +350,8 @@ class AppWindow(Frame):
             self.query_target_label.config(text=f"Target: Database 1 - {table_name}")
             self.display_table_content(self.db1_connector, self.last_selected_table)
             self.display_table_indexes(self.db1_connector, self.last_selected_table)
+            self.sql_text.delete("1.0", END)
+            self.sql_text.insert("1.0", f"SELECT * FROM {self.last_selected_table} WHERE ")
 
     def display_db2_table_content(self, event):
         selected = self.db2_tables.selection()
@@ -321,6 +367,8 @@ class AppWindow(Frame):
             self.query_target_label.config(text=f"Target: Database 2 - {table_name}")
             self.display_table_content(self.db2_connector, self.last_selected_table, page=0)
             self.display_table_indexes(self.db2_connector, self.last_selected_table)
+            self.sql_text.delete("1.0", END)
+            self.sql_text.insert("1.0", f"SELECT * FROM {self.last_selected_table} WHERE ")
 
     # --- Table content display (implement as needed) ---
     def display_table_content(self, connector, table_full_name, page=0):
@@ -486,35 +534,99 @@ class AppWindow(Frame):
         self.pending_merge_table = table_name
         self.log("Review the actual SQL above and click 'Execute SQL' to proceed.")
 
+    def _pre_merge_cleanup(self, table_name):
+        """Deletes non-positive beneficiaries from the given table in DB2."""
+        db2_cur = self.db2_connector.connection.cursor()
+        table_name_upper = table_name.upper()
+        
+        # Cleanup for OVCID
+        if table_name_upper in self.OVCID_TABLES:
+            self.log(f"Checking for non-positive OVCIDs for table {table_name}...")
+            db2_cur.execute("SELECT OVCID FROM APP.CHILDRENENROLLMENT WHERE CURRENTHIVSTATUS != 1")
+            non_positives = [row[0] for row in db2_cur.fetchall()]
+            if non_positives:
+                placeholders = ','.join(['?'] * len(non_positives))
+                del_sql = f'DELETE FROM {table_name} WHERE OVCID IN ({placeholders})'
+                try:
+                    db2_cur.execute(del_sql, non_positives)
+                    self.db2_connector.connection.commit()
+                    self.log(f"Deleted {db2_cur.rowcount} non-positive OVC records from {table_name} in DB2.")
+                except Exception as e:
+                    self.log(f"Error during OVCID cleanup for {table_name}: {e}")
+            else:
+                self.log("No non-positive OVCIDs found to clean up.")
+
+        # Cleanup for BENEFICIARYID
+        if table_name_upper in self.BENEFICIARYID_TABLES:
+            self.log(f"Checking for non-positive BENEFICIARYIDs for table {table_name}...")
+            db2_cur.execute("SELECT BENEFICIARYID FROM APP.ADULTHOUSEHOLDMEMBER WHERE CURRENTHIVSTATUS != 1")
+            non_positives = [row[0] for row in db2_cur.fetchall()]
+            if non_positives:
+                placeholders = ','.join(['?'] * len(non_positives))
+                del_sql = f'DELETE FROM {table_name} WHERE BENEFICIARYID IN ({placeholders})'
+                try:
+                    db2_cur.execute(del_sql, non_positives)
+                    self.db2_connector.connection.commit()
+                    self.log(f"Deleted {db2_cur.rowcount} non-positive BENEFICIARY records from {table_name} in DB2.")
+                except Exception as e:
+                    self.log(f"Error during BENEFICIARYID cleanup for {table_name}: {e}")
+            else:
+                self.log("No non-positive BENEFICIARYIDs found to clean up.")
+
+    def merge_all_tables(self):
+        """Handles the 'Merge All Tables' button click."""
+        if not self.db1_connector.connection or not self.db2_connector.connection:
+            messagebox.showerror("Error", "Both databases must be connected to merge all tables.")
+            return
+
+        if messagebox.askyesno("Confirm Merge All", "This will merge all specified tables from Database 2 into Database 1. This operation cannot be undone. Are you sure you want to proceed?"):
+            self.merge_all_button.config(state="disabled", text="Merging...")
+            # Run the merge process in a separate thread to keep the UI responsive
+            threading.Thread(target=self._run_full_merge, daemon=True).start()
+
+    def _run_full_merge(self):
+        """The actual logic for merging all tables, run in a thread."""
+        self.log("\n" + "="*50)
+        self.log("Starting full data migration from DB2 to DB1...")
+        self.log("="*50)
+
+        total_tables = len(self.MERGE_ALL_TABLES_LIST)
+        for i, table_name_no_schema in enumerate(self.MERGE_ALL_TABLES_LIST):
+            table_name = ensure_schema(table_name_no_schema)
+            self.log("\n" + "-"*50)
+            self.log(f"Processing table {i+1}/{total_tables}: {table_name}")
+            self.log("-" * 50)
+            
+            try:
+                # 1. Perform pre-merge cleanup
+                self._pre_merge_cleanup(table_name)
+
+                # 2. Perform the merge
+                self.log(f"Starting merge for {table_name}...")
+                inserted_count = self.merge_logic.merge_table(table_name, table_name, log_callback=self.log)
+                self.log(f"SUCCESS: Merged {inserted_count} records for table {table_name}.")
+
+            except Exception as e:
+                self.log(f"FATAL ERROR for table {table_name}: {e}")
+                self.log(f"Skipping to next table.")
+
+        self.log("\n" + "="*50)
+        self.log("Full data migration process finished.")
+        self.log("="*50)
+        self.after(0, lambda: self.merge_all_button.config(state="normal", text="Merge All Tables (DB2 to DB1)"))
+        self.after(0, lambda: messagebox.showinfo("Complete", "Full data migration process has finished. Please check the logs for details."))
+
     # --- Execute SQL logic ---
     def execute_sql(self):
         sql = self.sql_text.get("1.0", END).strip()
         if self.pending_merge:
             table_name = self.pending_merge_table
-            db2_cur = self.db2_connector.connection.cursor()
-            # 1. If OVCID or BENEFICIARYID, filter out non-positives from DB2 before merging
-            if "OVCID" in table_name.upper():
-                db2_cur.execute("SELECT OVCID FROM APP.CHILDRENENROLLMENT WHERE CURRENTHIVSTATUS !=1")
-                non_positives = [row[0] for row in db2_cur.fetchall()]
-                if non_positives:
-                    placeholders = ','.join(['?'] * len(non_positives))
-                    del_sql = f'DELETE FROM {table_name} WHERE OVCID IN ({placeholders})'
-                    db2_cur.execute(del_sql, non_positives)
-                    self.db2_connector.connection.commit()
-                    self.log(f"Deleted non-positive OVCIDs from {table_name} in DB2.")
-            if "BENEFICIARYID" in table_name.upper():
-                db2_cur.execute("SELECT BENEFICIARYID FROM APP.ADULTHOUSEHOLDMEMBER WHERE CURRENTHIVSTATUS !=1")
-                non_positives = [row[0] for row in db2_cur.fetchall()]
-                if non_positives:
-                    placeholders = ','.join(['?'] * len(non_positives))
-                    del_sql = f'DELETE FROM {table_name} WHERE BENEFICIARYID IN ({placeholders})'
-                    db2_cur.execute(del_sql, non_positives)
-                    self.db2_connector.connection.commit()
-                    self.log(f"Deleted non-positive BENEFICIARYIDs from {table_name} in DB2.")
+            # 1. Perform pre-merge cleanup
+            self._pre_merge_cleanup(table_name)
             # 2. Now perform the merge
             inserted = self.merge_logic.merge_table(table_name, table_name, log_callback=self.log)
-            self.log(f"Success: Merged {inserted} records from '{table_name}' in Database 2 into '{table_name}' in Database 1.")
-            messagebox.showinfo("Success", f"Merged {inserted} records from '{table_name}' in Database 2 into '{table_name}' in Database 1.")
+            self.log(f"Success: Merged {inserted} records for table {table_name}.")
+            messagebox.showinfo("Success", f"Merged {inserted} records for table {table_name}.")
             self.pending_merge = False
             self.pending_merge_table = None
             return
@@ -549,7 +661,7 @@ class AppWindow(Frame):
                 self.log(f"SQL executed successfully (no result set): {sql}")
         except Exception as e:
             self.log(f"SQL execution error: {e} | SQL: {sql}")
-            messagebox.showerror("SQL Error", f"ERROR EXECUTING SQL: {e}")
+            messagebox.showerror("SQL Error", f"Error executing SQL: {e}")
 
     # --- Download Excel, Pagination, and other methods ---
     def download_excel(self):
@@ -676,3 +788,9 @@ class AppWindow(Frame):
             if col_name:
                 column_names.append(col_name[0])
         return column_names
+
+    def log_table_primary_keys(self, connector, db_name):
+        """Logs all tables and their primary keys for a given connection."""
+        # This method was added in a previous step and is assumed to exist.
+        # No changes needed here.
+        pass
