@@ -106,7 +106,7 @@ class AppWindow(Frame):
         self.db1_tables.heading("Table", text="Table Name")
         self.db1_tables.pack(fill=BOTH, expand=True)
         self.db1_tables.bind("<<TreeviewSelect>>", self.display_db1_table_content)
-        self.tables_pane.add(self.db1_tables_frame)
+        self.tables_pane.add(self.db1_tables_frame, minsize=200)
 
         # DB2 Table List
         self.db2_tables_frame = Frame(self.tables_pane)
@@ -118,7 +118,7 @@ class AppWindow(Frame):
         self.db2_tables.heading("Table", text="Table Name")
         self.db2_tables.pack(fill=BOTH, expand=True)
         self.db2_tables.bind("<<TreeviewSelect>>", self.display_db2_table_content)
-        self.tables_pane.add(self.db2_tables_frame)
+        self.tables_pane.add(self.db2_tables_frame, minsize=200)
 
         # --- Main vertical PanedWindow for the rest of the UI ---
         self.main_pane = PanedWindow(self, orient="vertical")
@@ -140,27 +140,25 @@ class AppWindow(Frame):
         self.sql_text.config(yscrollcommand=self.sql_scroll.set)
         self.query_pane.add(self.query_frame, minsize=60)
 
-        # Buttons row (always visible)
-        self.buttons_frame = Frame(self.query_pane)
-        self.buttons_frame.pack(fill=X, pady=(0, 5))
-        self.sql_execute_button = Button(self.buttons_frame, text="Execute SQL", command=self.execute_sql)
-        self.sql_execute_button.pack(side=LEFT, padx=2)
-        self.merge_button = Button(self.buttons_frame, text="Merge Selected Table", command=self.merge_selected_table)
-        self.merge_button.pack(side=LEFT, padx=2)
-        self.download_button = Button(self.buttons_frame, text="Download Excel", command=self.download_excel)
-        self.download_button.pack(side=LEFT, padx=2)
-
-        self.query_pane.add(self.buttons_frame, minsize=40)
-
         # --- Table Contents label, pagination, and buttons on the same row ---
+        self.content_frame = Frame(self.main_pane)
+        self.main_pane.add(self.content_frame, minsize=100)
         self.content_header_frame = Frame(self.content_frame)
         self.content_header_frame.pack(fill=X, pady=(10, 2))
 
         self.content_source_label = Label(self.content_header_frame, text="No table selected", font=("Segoe UI", 10, "bold"))
         self.content_source_label.pack(side=LEFT, padx=(0, 10))
 
+        self.sql_execute_button = Button(self.content_header_frame, text="Execute SQL", command=self.execute_sql)
+        self.sql_execute_button.pack(side=LEFT, padx=2)
+        self.merge_button = Button(self.content_header_frame, text="Merge Selected Table", command=self.merge_selected_table)
+        self.merge_button.pack(side=LEFT, padx=2)
+        self.download_button = Button(self.content_header_frame, text="Download Excel", command=self.download_excel)
+        self.download_button.pack(side=LEFT, padx=2)
+
+        # Pagination controls
         self.prev_button = Button(self.content_header_frame, text="Previous", command=self.prev_page)
-        self.prev_button.pack(side=LEFT, padx=2)
+        self.prev_button.pack(side=LEFT, padx=(10, 2))
         self.next_button = Button(self.content_header_frame, text="Next", command=self.next_page)
         self.next_button.pack(side=LEFT, padx=2)
         self.page_label = Label(self.content_header_frame, text="Page 1")
@@ -170,13 +168,6 @@ class AppWindow(Frame):
         self.limit_entry = Entry(self.content_header_frame, width=5)
         self.limit_entry.insert(0, "100")
         self.limit_entry.pack(side=LEFT, padx=2)
-
-        self.sql_execute_button = Button(self.content_header_frame, text="Execute SQL", command=self.execute_sql)
-        self.sql_execute_button.pack(side=LEFT, padx=2)
-        self.merge_button = Button(self.content_header_frame, text="Merge Selected Table", command=self.merge_selected_table)
-        self.merge_button.pack(side=LEFT, padx=2)
-        self.download_button = Button(self.content_header_frame, text="Download Excel", command=self.download_excel)
-        self.download_button.pack(side=LEFT, padx=2)
 
         # --- Table contents display box ---
         self.content_tree = ttk.Treeview(self.content_frame, show="headings")
@@ -217,8 +208,8 @@ class AppWindow(Frame):
                 self.db2_facility_entry.delete(0, END)
                 self.db2_facility_entry.insert(0, facility_name)
 
-        self.db1_tables.bind("<<TreeviewSelect>>", update_db_facility)
-        self.db2_tables.bind("<<TreeviewSelect>>", update_db_facility)
+        self.db1_tables.bind("<<TreeviewSelect>>", update_db_facility, add='+')
+        self.db2_tables.bind("<<TreeviewSelect>>", update_db_facility, add='+')
 
     def log(self, message):
         self.log_text.config(state="normal")
@@ -299,6 +290,7 @@ class AppWindow(Frame):
             facility = self.db1_facility_entry.get()
             self.content_source_label.config(text=f"Showing: {facility} - {table_name}")
             self.display_table_content(self.db1_connector, table_name)
+            self.display_table_indexes(self.db1_connector, table_name)
 
     def display_db2_table_content(self, event):
         selected = self.db2_tables.selection()
@@ -309,7 +301,7 @@ class AppWindow(Frame):
             facility = self.db2_facility_entry.get()
             self.content_source_label.config(text=f"Showing: {facility} - {table_name}")
             # self.query_target_label.config(...)  # If you have this label
-            self.display_table_content(self.db2_connector, table_name)
+            self.display_table_content(self.db2_connector, table_name, page=0)
 
     # --- Table content display (implement as needed) ---
     def display_table_content(self, connector, table_full_name, page=0):
