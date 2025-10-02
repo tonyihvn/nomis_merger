@@ -130,8 +130,14 @@ class AppWindow(Frame):
 
         # Query section
         self.query_frame = Frame(self.query_pane)
-        self.query_label = Label(self.query_frame, text="SQL Query", font=("Segoe UI", 10, "bold"))
-        self.query_label.pack(anchor="w", padx=5, pady=(10, 0))
+
+        # Frame to hold the query title and target label on one line
+        query_header_frame = Frame(self.query_frame)
+        query_header_frame.pack(fill=X, padx=5, pady=(10, 2))
+        self.query_label = Label(query_header_frame, text="SQL Query", font=("Segoe UI", 10, "bold"))
+        self.query_label.pack(side=LEFT, anchor="w")
+        self.query_target_label = Label(query_header_frame, text="Target: (select a table)", font=("Segoe UI", 8, "italic"))
+        self.query_target_label.pack(side=LEFT, anchor="w", padx=(5, 0))
 
         self.sql_text = Text(self.query_frame, height=4, wrap="word")
         self.sql_text.pack(side=LEFT, fill=BOTH, expand=True)
@@ -255,16 +261,16 @@ class AppWindow(Frame):
             self.db1_tables.delete(row)
         self.db1_table_list = []
         try:
+            facility_name = self.db1_facility_entry.get()
             cursor = self.db1_connector.connection.cursor()
             cursor.execute("""
                 SELECT s.schemaname, t.tablename
                 FROM sys.systables t
                 JOIN sys.sysschemas s ON t.schemaid = s.schemaid
-                WHERE t.tabletype = 'T'
+                WHERE t.tabletype = 'T' AND s.schemaname = 'APP'
             """)
-            self.db1_table_list = [(row[0], row[1]) for row in cursor.fetchall()]
-            for schema, table in self.db1_table_list:
-                self.db1_tables.insert("", "end", values=(f"{schema}.{table}",))
+            for schema, table in cursor.fetchall():
+                self.db1_tables.insert("", "end", values=(f"{facility_name}.{table}",), tags=(schema,))
         except Exception as e:
             messagebox.showerror("Error", f"Failed to retrieve tables from DB1:\n{e}")
 
@@ -273,11 +279,16 @@ class AppWindow(Frame):
             self.db2_tables.delete(row)
         self.db2_table_list = []
         try:
+            facility_name = self.db2_facility_entry.get()
             cursor = self.db2_connector.connection.cursor()
-            cursor.execute("SELECT tablename FROM sys.systables WHERE tabletype='T'")
-            self.db2_table_list = [row[0] for row in cursor.fetchall()]
-            for table in self.db2_table_list:
-                self.db2_tables.insert("", "end", values=(table,))
+            cursor.execute("""
+                SELECT s.schemaname, t.tablename
+                FROM sys.systables t
+                JOIN sys.sysschemas s ON t.schemaid = s.schemaid
+                WHERE t.tabletype = 'T' AND s.schemaname = 'APP'
+            """)
+            for schema, table in cursor.fetchall():
+                self.db2_tables.insert("", "end", values=(f"{facility_name}.{table}",), tags=(schema,))
         except Exception as e:
             messagebox.showerror("Error", f"Failed to retrieve tables from DB2:\n{e}")
 
@@ -285,23 +296,31 @@ class AppWindow(Frame):
         selected = self.db1_tables.selection()
         if selected:
             table_name = self.db1_tables.item(selected[0])['values'][0]
-            self.last_selected_table = table_name
+            # Use the stored schema from the tag for backend operations
+            schema = self.db1_tables.item(selected[0], 'tags')[0]
+            _, table_only = table_name.split('.', 1)
+            self.last_selected_table = f"{schema}.{table_only}"
             self.last_selected_db = "Database 1"
             facility = self.db1_facility_entry.get()
             self.content_source_label.config(text=f"Showing: {facility} - {table_name}")
-            self.display_table_content(self.db1_connector, table_name)
-            self.display_table_indexes(self.db1_connector, table_name)
+            self.query_target_label.config(text=f"Target: Database 1 - {table_name}")
+            self.display_table_content(self.db1_connector, self.last_selected_table)
+            self.display_table_indexes(self.db1_connector, self.last_selected_table)
 
     def display_db2_table_content(self, event):
         selected = self.db2_tables.selection()
         if selected:
             table_name = self.db2_tables.item(selected[0])['values'][0]
-            self.last_selected_table = table_name
+            # Use the stored schema from the tag for backend operations
+            schema = self.db2_tables.item(selected[0], 'tags')[0]
+            _, table_only = table_name.split('.', 1)
+            self.last_selected_table = f"{schema}.{table_only}"
             self.last_selected_db = "Database 2"  # Track selected DB
             facility = self.db2_facility_entry.get()
             self.content_source_label.config(text=f"Showing: {facility} - {table_name}")
-            # self.query_target_label.config(...)  # If you have this label
-            self.display_table_content(self.db2_connector, table_name, page=0)
+            self.query_target_label.config(text=f"Target: Database 2 - {table_name}")
+            self.display_table_content(self.db2_connector, self.last_selected_table, page=0)
+            self.display_table_indexes(self.db2_connector, self.last_selected_table)
 
     # --- Table content display (implement as needed) ---
     def display_table_content(self, connector, table_full_name, page=0):
@@ -373,42 +392,55 @@ class AppWindow(Frame):
 
             # Primary keys
             cursor.execute(f"""
-                SELECT c.columnname
-                FROM sys.sysconstraints cons
-                JOIN sys.systables t ON cons.tableid = t.tableid
+                SELECT cg.descriptor
+                FROM sys.sysconstraints c
+                JOIN sys.syskeys k ON c.constraintid = k.constraintid
+                JOIN sys.sysconglomerates cg ON k.conglomerateid = cg.conglomerateid
+                JOIN sys.systables t ON c.tableid = t.tableid
                 JOIN sys.sysschemas s ON t.schemaid = s.schemaid
-                JOIN sys.syskeys k ON cons.constraintid = k.constraintid
-                JOIN sys.syscolumns c ON k.columnid = c.columnid AND t.tableid = c.referenceid
-                WHERE cons.type = 'P' AND t.tablename = '{table.upper()}' AND s.schemaname = '{schema.upper()}'
+                WHERE c.type = 'P'
+                  AND t.tablename = '{table.upper()}'
+                  AND s.schemaname = '{schema.upper()}'
             """)
-            pk = [row[0] for row in cursor.fetchall()]
+            pk_descriptor = cursor.fetchone()
+            pk = self._parse_key_descriptor(pk_descriptor[0], cursor, table.upper(), schema.upper()) if pk_descriptor else []
             self.index_text.insert(END, f"Primary Key(s): {', '.join(pk) if pk else 'None'}\n\n")
 
             # Unique keys
             cursor.execute(f"""
-                SELECT c.columnname
-                FROM sys.sysconstraints cons
-                JOIN sys.systables t ON cons.tableid = t.tableid
+                SELECT cg.descriptor
+                FROM sys.sysconstraints c
+                JOIN sys.syskeys k ON c.constraintid = k.constraintid
+                JOIN sys.sysconglomerates cg ON k.conglomerateid = cg.conglomerateid
+                JOIN sys.systables t ON c.tableid = t.tableid
                 JOIN sys.sysschemas s ON t.schemaid = s.schemaid
-                JOIN sys.syskeys k ON cons.constraintid = k.constraintid
-                JOIN sys.syscolumns c ON k.columnid = c.columnid AND t.tableid = c.referenceid
-                WHERE cons.type = 'U' AND t.tablename = '{table.upper()}' AND s.schemaname = '{schema.upper()}'
+                WHERE c.type = 'U'
+                  AND t.tablename = '{table.upper()}'
+                  AND s.schemaname = '{schema.upper()}'
             """)
-            uk = [row[0] for row in cursor.fetchall()]
-            self.index_text.insert(END, f"Unique Key(s): {', '.join(uk) if uk else 'None'}\n\n")
+            uk_descriptors = cursor.fetchall()
+            all_uks = []
+            for desc in uk_descriptors:
+                all_uks.extend(self._parse_key_descriptor(desc[0], cursor, table.upper(), schema.upper()))
+            self.index_text.insert(END, f"Unique Key(s): {', '.join(all_uks) if all_uks else 'None'}\n\n")
 
             # Foreign keys
             cursor.execute(f"""
-                SELECT c.columnname
-                FROM sys.sysconstraints cons
-                JOIN sys.systables t ON cons.tableid = t.tableid
+                SELECT cg.descriptor
+                FROM sys.sysconstraints c
+                JOIN sys.syskeys k ON c.constraintid = k.constraintid
+                JOIN sys.sysconglomerates cg ON k.conglomerateid = cg.conglomerateid
+                JOIN sys.systables t ON c.tableid = t.tableid
                 JOIN sys.sysschemas s ON t.schemaid = s.schemaid
-                JOIN sys.syskeys k ON cons.constraintid = k.constraintid
-                JOIN sys.syscolumns c ON k.columnid = c.columnid AND t.tableid = c.referenceid
-                WHERE cons.type = 'F' AND t.tablename = '{table.upper()}' AND s.schemaname = '{schema.upper()}'
+                WHERE c.type = 'F'
+                  AND t.tablename = '{table.upper()}'
+                  AND s.schemaname = '{schema.upper()}'
             """)
-            fk = [row[0] for row in cursor.fetchall()]
-            self.index_text.insert(END, f"Foreign Key(s): {', '.join(fk) if fk else 'None'}\n\n")
+            fk_descriptors = cursor.fetchall()
+            all_fks = []
+            for desc in fk_descriptors:
+                all_fks.extend(self._parse_key_descriptor(desc[0], cursor, table.upper(), schema.upper()))
+            self.index_text.insert(END, f"Foreign Key(s): {', '.join(all_fks) if all_fks else 'None'}\n\n")
 
         except Exception as e:
             self.index_text.insert(END, f"Error fetching indexes: {e}\n")
@@ -501,10 +533,11 @@ class AppWindow(Frame):
             cursor.execute(sql)
             if cursor.description:
                 columns = [desc[0] for desc in cursor.description]
+                # Use the original column names as identifiers for consistency.
                 self.content_tree["columns"] = columns
-                for col in columns:
-                    self.content_tree.heading(col, text=col)
-                    self.content_tree.column(col, width=120, minwidth=120, stretch=False, anchor="center")
+                for col_name in columns:
+                    self.content_tree.heading(col_name, text=col_name)
+                    self.content_tree.column(col_name, width=120, minwidth=120, stretch=False, anchor="center")
                 self.content_tree.delete(*self.content_tree.get_children())
                 rows = cursor.fetchall()
                 for row in rows:
@@ -594,16 +627,15 @@ class AppWindow(Frame):
         if not self.current_connector or not self.current_connector.connection:
             return
 
-        try:
-            cursor = self.current_connector.connection.cursor()
-
-            # Clear previous content
-            for col in self.content_tree["columns"]:
-                self.content_tree.heading(col, text="")
+        # Clear previous content
+        for col in self.content_tree["columns"]:
+            self.content_tree.heading(col, text="")
             self.content_tree.delete(*self.content_tree.get_children())
 
-            # Fetch the data for the current page
-            offset = self.current_page * self.page_size
+        # Fetch the data for the current page
+        offset = self.current_page * self.page_size
+        try:
+            cursor = self.current_connector.connection.cursor()
             cursor.execute(f'SELECT * FROM {self.current_table} OFFSET {offset} ROWS FETCH NEXT {self.page_size} ROWS ONLY')
             columns = [desc[0] for desc in cursor.description]
             display_columns = ["#"] + columns
@@ -619,4 +651,28 @@ class AppWindow(Frame):
             # Update the page label
             self.page_label.config(text=f"Page {self.current_page + 1}")
         except Exception as e:
-            messagebox.showerror("Error", f"Error loading table: {e}")
+            self.log(f"Error updating table content: {e}")
+
+    def _parse_key_descriptor(self, descriptor, cursor, table_name, schema_name):
+        """Helper to parse Derby's key descriptor and return column names."""
+        import re
+        # Descriptor format is like: "base table conglomerate (1, 2, -3)"
+        # The numbers are the 1-based column positions in the table.
+        # Negative numbers indicate descending order, which we ignore for just getting names.
+        match = re.search(r'\((\s*[-]?\d+\s*(?:,\s*[-]?\d+\s*)*)\)', str(descriptor))
+        if not match:
+            return []
+
+        column_positions = [abs(int(p.strip())) for p in match.group(1).split(',')]
+        column_names = []
+        for pos in column_positions:
+            cursor.execute(f"""
+                SELECT c.columnname FROM sys.syscolumns c
+                JOIN sys.systables t ON c.referenceid = t.tableid
+                JOIN sys.sysschemas s ON t.schemaid = s.schemaid
+                WHERE t.tablename = '{table_name}' AND s.schemaname = '{schema_name}' AND c.columnnumber = {pos}
+            """)
+            col_name = cursor.fetchone()
+            if col_name:
+                column_names.append(col_name[0])
+        return column_names
