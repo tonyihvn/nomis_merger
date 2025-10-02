@@ -641,15 +641,9 @@ class AppWindow(Frame):
     def execute_sql(self):
         sql = self.sql_text.get("1.0", END).strip()
         if self.pending_merge:
-            table_name = self.pending_merge_table
-            # 1. Perform pre-merge cleanup
-            self._pre_merge_cleanup(table_name)
-            # 2. Now perform the merge
-            inserted = self.merge_logic.merge_table(table_name, table_name, log_callback=self.log)
-            self.log(f"Success: Merged {inserted} records for table {table_name}.")
-            messagebox.showinfo("Success", f"Merged {inserted} records for table {table_name}.")
-            self.pending_merge = False
-            self.pending_merge_table = None
+            if messagebox.askyesno("Confirm Merge", f"This will merge the table '{self.pending_merge_table}' from Database 2 into Database 1. Are you sure?"):
+                self.sql_execute_button.config(state="disabled", text="Merging...")
+                threading.Thread(target=self._run_single_merge, daemon=True).start()
             return
 
         # Normal SQL execution
@@ -683,6 +677,43 @@ class AppWindow(Frame):
         except Exception as e:
             self.log(f"SQL execution error: {e} | SQL: {sql}")
             messagebox.showerror("SQL Error", f"Error executing SQL: {e}")
+
+    def _run_single_merge(self):
+        """The actual logic for merging a single table, run in a thread."""
+        table_name = self.pending_merge_table
+        self.log(f"\n--- Starting merge for table: {table_name} ---")
+
+        # --- Progress Bar Window ---
+        progress_win = Toplevel(self)
+        progress_win.title("Merging Table")
+        progress_win.geometry("400x120")
+        progress_win.grab_set()
+
+        progress_label = Label(progress_win, text=f"Merging table: {table_name}...")
+        progress_label.pack(pady=10, padx=10)
+
+        progress_bar = ttk.Progressbar(progress_win, orient=HORIZONTAL, length=350, mode='indeterminate')
+        progress_bar.pack(pady=10, padx=10)
+        progress_bar.start()
+
+        try:
+            # 1. Perform pre-merge cleanup
+            self.after(0, lambda: progress_label.config(text=f"Step 1/2: Cleaning up {table_name}..."))
+            self._pre_merge_cleanup(table_name)
+
+            # 2. Perform the merge
+            self.after(0, lambda: progress_label.config(text=f"Step 2/2: Merging data into {table_name}..."))
+            inserted = self.merge_logic.merge_table(table_name, table_name, log_callback=self.log)
+            self.log(f"Success: Merged {inserted} records for table {table_name}.")
+            self.after(0, lambda: messagebox.showinfo("Success", f"Merged {inserted} records for table {table_name}."))
+        except Exception as e:
+            self.log(f"FATAL ERROR during merge for table {table_name}: {e}")
+            self.after(0, lambda: messagebox.showerror("Merge Error", f"An error occurred while merging {table_name}:\n{e}"))
+        finally:
+            self.pending_merge = False
+            self.pending_merge_table = None
+            self.after(0, progress_win.destroy)
+            self.after(0, lambda: self.sql_execute_button.config(state="normal", text="Execute SQL"))
 
     # --- Download Excel, Pagination, and other methods ---
     def download_excel(self):
