@@ -1,6 +1,6 @@
 ----------------------------------------------------------------
-Wed Oct 01 23:53:00 WAT 2025:
-Booting Derby version The Apache Software Foundation - Apache Derby - 10.15.2.0 - (1873585): instance a816c00e-0199-a1fa-9ecd-000000f65d50 
+Thu Oct 02 09:40:19 WAT 2025:
+Booting Derby version The Apache Software Foundation - Apache Derby - 10.15.2.0 - (1873585): instance a816c00e-0199-a414-5385-000000f657d8 
 on database directory C:\Nomis3\dbs\nomis3db with class loader jdk.internal.loader.ClassLoaders$AppClassLoader@2a139a55 
 Loaded from file:/C:/Users/NwokomaAnthony/Desktop/PROJECTS/SOFTWARES/PYTHON/nomisMigration/src/db/DerbyJdbcDriver/derby.jar
 java.vendor=Oracle Corporation

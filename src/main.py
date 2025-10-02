@@ -11,7 +11,7 @@ DEFAULT_DRIVER_FOLDER = os.path.abspath(os.path.join(os.path.dirname(__file__), 
 class MainApplication:
     def __init__(self, root):
         self.root = root
-        self.root.title("Derby Database Merge Tool")
+        self.root.title("NOMIS Database Merge Tool")
         
         # Pass the folder containing all JARs
         self.db1_connector = DerbyConnector("", "", "", DEFAULT_DRIVER_FOLDER, DEFAULT_DRIVER_CLASS)

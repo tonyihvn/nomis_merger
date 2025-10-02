@@ -2,11 +2,12 @@ import os
 import pandas as pd
 import threading
 from tkinter import (
-    Frame, Button, Label, Entry, messagebox, Text, Scrollbar, VERTICAL, HORIZONTAL, END,
+    Frame, LabelFrame, Button, Label, Entry, messagebox, Text, Scrollbar, VERTICAL, HORIZONTAL, END,
     PanedWindow, BOTH, LEFT, RIGHT, X, Y, TOP, BOTTOM, Toplevel
 )
 from tkinter import ttk
 from tkinter import filedialog
+from tkinter import StringVar
 
 from db.derby_connector import DerbyConnector
 from db.merge_logic import MergeLogic
@@ -27,77 +28,101 @@ class AppWindow(Frame):
         self.pending_merge_table = None
         self.page_size = 100
 
-        # --- Main vertical PanedWindow ---
-        self.main_pane = PanedWindow(self, orient="vertical")
-        self.main_pane.pack(fill=BOTH, expand=True)
+        # --- Connection section (topmost) ---
+        self.conn_pane = PanedWindow(self, orient="horizontal")
+        self.conn_pane.pack(fill=X, padx=10, pady=10, side=TOP)
 
-        # --- Top: Connection settings and table lists ---
-        self.top_frame = Frame(self.main_pane)
-        self.main_pane.add(self.top_frame, minsize=120)
+        # --- Connection 1 Box ---
+        self.conn1_box = LabelFrame(self.conn_pane, text="Connection 1", padx=10, pady=10)
+        self.conn_pane.add(self.conn1_box)
 
-        # Connection settings row
-        self.conn_frame = Frame(self.top_frame)
-        self.conn_frame.pack(fill=X, pady=5)
-
-        # DB1
-        Label(self.conn_frame, text="DB1 Path:").pack(side=LEFT)
-        self.db1_entry = Entry(self.conn_frame, width=30)
+        # First row: DB Path and Facility Name
+        conn1_row1 = Frame(self.conn1_box)
+        conn1_row1.pack(fill=X, pady=(0, 5))
+        Label(conn1_row1, text="DB Path:").pack(side=LEFT)
+        self.db1_entry = Entry(conn1_row1, width=25)
         self.db1_entry.pack(side=LEFT, padx=2)
         self.db1_entry.insert(0, r"C:\Nomis3\dbs\nomis3db")
-        Label(self.conn_frame, text="Facility Name:").pack(side=LEFT)
-        self.db1_facility_entry = Entry(self.conn_frame, width=15)
+        Label(conn1_row1, text="Facility Name:").pack(side=LEFT)
+        self.db1_facility_entry = Entry(conn1_row1, width=12)
         self.db1_facility_entry.pack(side=LEFT, padx=2)
         self.db1_facility_entry.insert(0, "Facility1")
-        Label(self.conn_frame, text="Username:").pack(side=LEFT)
-        self.db1_user_entry = Entry(self.conn_frame, width=10)
+
+        # Second row: Username, Password, Connect Button
+        conn1_row2 = Frame(self.conn1_box)
+        conn1_row2.pack(fill=X)
+        Label(conn1_row2, text="Username:").pack(side=LEFT)
+        self.db1_user_entry = Entry(conn1_row2, width=10)
         self.db1_user_entry.pack(side=LEFT, padx=2)
         self.db1_user_entry.insert(0, "nomis")
-        Label(self.conn_frame, text="Password:").pack(side=LEFT)
-        self.db1_pass_entry = Entry(self.conn_frame, width=10, show="*")
+        Label(conn1_row2, text="Password:").pack(side=LEFT)
+        self.db1_pass_entry = Entry(conn1_row2, width=10, show="*")
         self.db1_pass_entry.pack(side=LEFT, padx=2)
         self.db1_pass_entry.insert(0, "nomispw")
-        self.db1_connect_button = Button(self.conn_frame, text="Connect DB1", command=self.connect_db1)
+        self.db1_connect_button = Button(conn1_row2, text="Connect DB1", command=self.connect_db1)
         self.db1_connect_button.pack(side=LEFT, padx=2)
 
-        # DB2
-        Label(self.conn_frame, text="   DB2 Path:").pack(side=LEFT)
-        self.db2_entry = Entry(self.conn_frame, width=30)
+        # --- Connection 2 Box ---
+        self.conn2_box = LabelFrame(self.conn_pane, text="Connection 2", padx=10, pady=10)
+        self.conn_pane.add(self.conn2_box)
+
+        # First row: DB Path and Facility Name
+        conn2_row1 = Frame(self.conn2_box)
+        conn2_row1.pack(fill=X, pady=(0, 5))
+        Label(conn2_row1, text="DB Path:").pack(side=LEFT)
+        self.db2_entry = Entry(conn2_row1, width=25)
         self.db2_entry.pack(side=LEFT, padx=2)
         self.db2_entry.insert(0, r"C:\Nomis3\dbs\nomis3db")
-        Label(self.conn_frame, text="Facility Name:").pack(side=LEFT)
-        self.db2_facility_entry = Entry(self.conn_frame, width=15)
+        Label(conn2_row1, text="Facility Name:").pack(side=LEFT)
+        self.db2_facility_entry = Entry(conn2_row1, width=12)
         self.db2_facility_entry.pack(side=LEFT, padx=2)
         self.db2_facility_entry.insert(0, "Facility2")
-        Label(self.conn_frame, text="Username:").pack(side=LEFT)
-        self.db2_user_entry = Entry(self.conn_frame, width=10)
+
+        # Second row: Username, Password, Connect Button
+        conn2_row2 = Frame(self.conn2_box)
+        conn2_row2.pack(fill=X)
+        Label(conn2_row2, text="Username:").pack(side=LEFT)
+        self.db2_user_entry = Entry(conn2_row2, width=10)
         self.db2_user_entry.pack(side=LEFT, padx=2)
         self.db2_user_entry.insert(0, "nomis")
-        Label(self.conn_frame, text="Password:").pack(side=LEFT)
-        self.db2_pass_entry = Entry(self.conn_frame, width=10, show="*")
+        Label(conn2_row2, text="Password:").pack(side=LEFT)
+        self.db2_pass_entry = Entry(conn2_row2, width=10, show="*")
         self.db2_pass_entry.pack(side=LEFT, padx=2)
         self.db2_pass_entry.insert(0, "nomispw")
-        self.db2_connect_button = Button(self.conn_frame, text="Connect DB2", command=self.connect_db2)
+        self.db2_connect_button = Button(conn2_row2, text="Connect DB2", command=self.connect_db2)
         self.db2_connect_button.pack(side=LEFT, padx=2)
 
-        # Table lists row (short height)
-        self.tables_frame = Frame(self.top_frame)
-        self.tables_frame.pack(fill=X, pady=5)
+        # --- Table lists section (just below connection) ---
+        self.tables_pane = PanedWindow(self, orient="horizontal")
+        self.tables_pane.pack(fill=BOTH, expand=False, pady=5, side=TOP)
 
         # DB1 Table List
-        self.db1_tables_label = Label(self.tables_frame, text="DB1 Tables")
-        self.db1_tables_label.pack(side=LEFT, anchor="n")
-        self.db1_tables = ttk.Treeview(self.tables_frame, columns=("Table",), show="headings", height=6)
+        self.db1_tables_frame = Frame(self.tables_pane)
+        self.db1_tables_label_var = StringVar()
+        self.db1_tables_label_var.set("DB1 Tables")
+        self.db1_tables_label = Label(self.db1_tables_frame, textvariable=self.db1_tables_label_var)
+        self.db1_tables_label.pack(anchor="w")
+        self.db1_tables = ttk.Treeview(self.db1_tables_frame, columns=("Table",), show="headings", height=8)
         self.db1_tables.heading("Table", text="Table Name")
-        self.db1_tables.pack(side=LEFT, fill=Y, padx=5)
+        self.db1_tables.pack(fill=BOTH, expand=True)
         self.db1_tables.bind("<<TreeviewSelect>>", self.display_db1_table_content)
+        self.tables_pane.add(self.db1_tables_frame)
 
         # DB2 Table List
-        self.db2_tables_label = Label(self.tables_frame, text="DB2 Tables")
-        self.db2_tables_label.pack(side=LEFT, anchor="n")
-        self.db2_tables = ttk.Treeview(self.tables_frame, columns=("Table",), show="headings", height=6)
+        self.db2_tables_frame = Frame(self.tables_pane)
+        self.db2_tables_label_var = StringVar()
+        self.db2_tables_label_var.set("DB2 Tables")
+        self.db2_tables_label = Label(self.db2_tables_frame, textvariable=self.db2_tables_label_var)
+        self.db2_tables_label.pack(anchor="w")
+        self.db2_tables = ttk.Treeview(self.db2_tables_frame, columns=("Table",), show="headings", height=8)
         self.db2_tables.heading("Table", text="Table Name")
-        self.db2_tables.pack(side=LEFT, fill=Y, padx=5)
+        self.db2_tables.pack(fill=BOTH, expand=True)
         self.db2_tables.bind("<<TreeviewSelect>>", self.display_db2_table_content)
+        self.tables_pane.add(self.db2_tables_frame)
+
+        # --- Main vertical PanedWindow for the rest of the UI ---
+        self.main_pane = PanedWindow(self, orient="vertical")
+        self.main_pane.pack(fill=BOTH, expand=True, side=TOP)
 
         # --- Middle: Query box (expandable) and buttons ---
         self.query_pane = PanedWindow(self.main_pane, orient="vertical")
@@ -124,25 +149,36 @@ class AppWindow(Frame):
         self.merge_button.pack(side=LEFT, padx=2)
         self.download_button = Button(self.buttons_frame, text="Download Excel", command=self.download_excel)
         self.download_button.pack(side=LEFT, padx=2)
-        self.prev_button = Button(self.buttons_frame, text="Previous", command=self.prev_page)
-        self.prev_button.pack(side=LEFT, padx=2)
-        self.next_button = Button(self.buttons_frame, text="Next", command=self.next_page)
-        self.next_button.pack(side=LEFT, padx=2)
-        self.page_label = Label(self.buttons_frame, text="Page 1")
-        self.page_label.pack(side=LEFT, padx=2)
-        self.limit_label = Label(self.buttons_frame, text="Limit:")
-        self.limit_label.pack(side=LEFT)
-        self.limit_entry = Entry(self.buttons_frame, width=5)
-        self.limit_entry.insert(0, "100")
-        self.limit_entry.pack(side=LEFT, padx=2)
+
         self.query_pane.add(self.buttons_frame, minsize=40)
 
-        # --- Table content (full width) ---
-        self.content_frame = Frame(self.main_pane, height=250)
-        self.main_pane.add(self.content_frame, minsize=200)
-        self.content_frame.pack_propagate(False)
-        self.content_source_label = Label(self.content_frame, text="No table selected", font=("Segoe UI", 10, "bold"))
-        self.content_source_label.pack(anchor="w", pady=(10, 2))
+        # --- Table Contents label, pagination, and buttons on the same row ---
+        self.content_header_frame = Frame(self.content_frame)
+        self.content_header_frame.pack(fill=X, pady=(10, 2))
+
+        self.content_source_label = Label(self.content_header_frame, text="No table selected", font=("Segoe UI", 10, "bold"))
+        self.content_source_label.pack(side=LEFT, padx=(0, 10))
+
+        self.prev_button = Button(self.content_header_frame, text="Previous", command=self.prev_page)
+        self.prev_button.pack(side=LEFT, padx=2)
+        self.next_button = Button(self.content_header_frame, text="Next", command=self.next_page)
+        self.next_button.pack(side=LEFT, padx=2)
+        self.page_label = Label(self.content_header_frame, text="Page 1")
+        self.page_label.pack(side=LEFT, padx=2)
+        self.limit_label = Label(self.content_header_frame, text="Limit:")
+        self.limit_label.pack(side=LEFT)
+        self.limit_entry = Entry(self.content_header_frame, width=5)
+        self.limit_entry.insert(0, "100")
+        self.limit_entry.pack(side=LEFT, padx=2)
+
+        self.sql_execute_button = Button(self.content_header_frame, text="Execute SQL", command=self.execute_sql)
+        self.sql_execute_button.pack(side=LEFT, padx=2)
+        self.merge_button = Button(self.content_header_frame, text="Merge Selected Table", command=self.merge_selected_table)
+        self.merge_button.pack(side=LEFT, padx=2)
+        self.download_button = Button(self.content_header_frame, text="Download Excel", command=self.download_excel)
+        self.download_button.pack(side=LEFT, padx=2)
+
+        # --- Table contents display box ---
         self.content_tree = ttk.Treeview(self.content_frame, show="headings")
         self.content_tree.pack(fill=BOTH, expand=True, side=LEFT)
         self.content_scroll_y = Scrollbar(self.content_frame, orient=VERTICAL, command=self.content_tree.yview)
@@ -170,7 +206,19 @@ class AppWindow(Frame):
         self.index_text = Text(self.index_frame, height=6, width=60, state="disabled", bg="#f4f4f4")
         self.index_text.pack(fill=BOTH, padx=5, pady=(0, 5), expand=True)
 
-    # --- Utility methods ---
+        # --- Facility name binding for dynamic label update ---
+        def update_db_facility(event):
+            selected = self.db1_tables.selection() or self.db2_tables.selection()
+            if selected:
+                table_name = self.db1_tables.item(selected[0])['values'][0] if self.db1_tables.selection() else self.db2_tables.item(selected[0])['values'][0]
+                facility_name = table_name.split('.')[0]
+                self.db1_facility_entry.delete(0, END)
+                self.db1_facility_entry.insert(0, facility_name)
+                self.db2_facility_entry.delete(0, END)
+                self.db2_facility_entry.insert(0, facility_name)
+
+        self.db1_tables.bind("<<TreeviewSelect>>", update_db_facility)
+        self.db2_tables.bind("<<TreeviewSelect>>", update_db_facility)
 
     def log(self, message):
         self.log_text.config(state="normal")
@@ -247,10 +295,9 @@ class AppWindow(Frame):
         if selected:
             table_name = self.db1_tables.item(selected[0])['values'][0]
             self.last_selected_table = table_name
-            self.last_selected_db = "Database 1"  # Track selected DB
+            self.last_selected_db = "Database 1"
             facility = self.db1_facility_entry.get()
             self.content_source_label.config(text=f"Showing: {facility} - {table_name}")
-            # self.query_target_label.config(...)  # If you have this label
             self.display_table_content(self.db1_connector, table_name)
 
     def display_db2_table_content(self, event):
@@ -310,6 +357,70 @@ class AppWindow(Frame):
             self.page_label.config(text=f"Page {self.current_page + 1}")
         except Exception as e:
             messagebox.showerror("Error", f"Error loading table: {e}")
+
+    def display_table_indexes(self, connector, table_full_name):
+        self.index_text.config(state="normal")
+        self.index_text.delete("1.0", END)
+        if not connector or not connector.connection:
+            self.index_text.insert(END, "Not connected.\n")
+            self.index_text.config(state="disabled")
+            return
+
+        try:
+            if '.' in table_full_name:
+                schema, table = table_full_name.split('.', 1)
+            else:
+                schema, table = 'APP', table_full_name
+
+            cursor = connector.connection.cursor()
+
+            # Total rows
+            cursor.execute(f'SELECT COUNT(*) FROM "{schema}"."{table}"')
+            total_rows = cursor.fetchone()[0]
+            self.index_text.insert(END, f"Total Rows: {total_rows}\n\n")
+
+            # Primary keys
+            cursor.execute(f"""
+                SELECT c.columnname
+                FROM sys.sysconstraints cons
+                JOIN sys.systables t ON cons.tableid = t.tableid
+                JOIN sys.sysschemas s ON t.schemaid = s.schemaid
+                JOIN sys.syskeys k ON cons.constraintid = k.constraintid
+                JOIN sys.syscolumns c ON k.columnid = c.columnid AND t.tableid = c.referenceid
+                WHERE cons.type = 'P' AND t.tablename = '{table.upper()}' AND s.schemaname = '{schema.upper()}'
+            """)
+            pk = [row[0] for row in cursor.fetchall()]
+            self.index_text.insert(END, f"Primary Key(s): {', '.join(pk) if pk else 'None'}\n\n")
+
+            # Unique keys
+            cursor.execute(f"""
+                SELECT c.columnname
+                FROM sys.sysconstraints cons
+                JOIN sys.systables t ON cons.tableid = t.tableid
+                JOIN sys.sysschemas s ON t.schemaid = s.schemaid
+                JOIN sys.syskeys k ON cons.constraintid = k.constraintid
+                JOIN sys.syscolumns c ON k.columnid = c.columnid AND t.tableid = c.referenceid
+                WHERE cons.type = 'U' AND t.tablename = '{table.upper()}' AND s.schemaname = '{schema.upper()}'
+            """)
+            uk = [row[0] for row in cursor.fetchall()]
+            self.index_text.insert(END, f"Unique Key(s): {', '.join(uk) if uk else 'None'}\n\n")
+
+            # Foreign keys
+            cursor.execute(f"""
+                SELECT c.columnname
+                FROM sys.sysconstraints cons
+                JOIN sys.systables t ON cons.tableid = t.tableid
+                JOIN sys.sysschemas s ON t.schemaid = s.schemaid
+                JOIN sys.syskeys k ON cons.constraintid = k.constraintid
+                JOIN sys.syscolumns c ON k.columnid = c.columnid AND t.tableid = c.referenceid
+                WHERE cons.type = 'F' AND t.tablename = '{table.upper()}' AND s.schemaname = '{schema.upper()}'
+            """)
+            fk = [row[0] for row in cursor.fetchall()]
+            self.index_text.insert(END, f"Foreign Key(s): {', '.join(fk) if fk else 'None'}\n\n")
+
+        except Exception as e:
+            self.index_text.insert(END, f"Error fetching indexes: {e}\n")
+        self.index_text.config(state="disabled")
 
     # --- Merge logic with SQL preview ---
     def merge_selected_table(self):
